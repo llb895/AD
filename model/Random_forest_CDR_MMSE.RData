@@ -1,0 +1,353 @@
+library(dplyr)   
+df1 <- read.csv("1_reordered.select.csv")  
+df2 <- read.csv("pinfen.csv")  
+df_merged <- left_join(df1, df2, by = "gene_id")  
+write.csv(df_merged, "new_pinfen.csv", row.names = FALSE)
+
+df3 <- read.csv("cdr.csv")  
+df3_clean <- na.omit(df3)
+write.csv(df3_clean, "deal_cdr.csv", row.names = FALSE)
+
+df4 <- read.csv("mmse.csv")  
+df4_clean <- na.omit(df4)
+write.csv(df4_clean, "deal_mmse.csv", row.names = FALSE)
+
+df5 <- read.csv("new.csv")  
+df5_clean <- na.omit(df5)
+write.csv(df5_clean, "deal_mmse+cdr.csv", row.names = FALSE)
+#-----------------------------------------------------------------------------------------Processing csv files
+
+
+#！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！ 昧字畢爽亭栽謹庁蓑
+library(randomForest)
+library(dplyr)   
+library(pROC)
+library(caret)  
+mcc_values <- numeric(6)  
+file1 <- c("1_reordered.select.csv", "2_reordered.select.csv", "3_reordered.select.csv", "4selected_features.csv", "5_reordered.select.csv")  
+roc_objects <- list()  
+auc_list <- list() 
+pred_probs <- list()
+probs_2 <- list()
+for (i in 1:length(file1)) {
+   data <-  read.csv(file1[i])
+   nrow_data <- nrow(data)
+   trainset <- data[1:120, ]
+   testset <- data[121:nrow_data, ]
+   x_train <- trainset[, -c(1, 2)]  #Suppose id is the first column and class is the second column
+   y_train <- trainset[, 2] 
+   y_train <- factor(y_train, labels = c("AD", "NCI"))   
+   set.seed(999)             
+   rf.train <- randomForest(x = x_train, y = y_train)
+   x_test <- testset[, -c(1, 2)]  
+   y_test <- testset[, 2] 
+   y_test <- factor(y_test, labels = c("AD", "NCI"))  
+   rf.test1 <- predict(rf.train, x_train, type = "prob")     
+   probs_2[[i]] <- rf.test1   #The classification probability of the training set itself is obtained as the new training set feature data
+   rf.test2 <- predict(rf.train, x_test, type = "prob")
+   roc_objects[[i]] <- roc(y_test, rf.test2[,2])  
+   print(roc_objects[[i]])
+   pred_probs[[i]] <- rf.test2 
+   auc <- auc(roc_objects[[i]])
+   auc_list[i] <- auc     
+   predicted_classes <- ifelse(rf.test2[,1] >= 0.5, "AD", "NCI")      
+   TP <- sum(predicted_classes == "AD" & testset$class == "AD")  
+   FP <- sum(predicted_classes == "AD" & testset$class == "NCI")  
+   FN <- sum(predicted_classes == "NCI" & testset$class == "AD")  
+   TN <- sum(predicted_classes == "NCI" & testset$class == "NCI")
+   precision <- TP / (TP + FP)  
+   recall <- TP / (TP + FN)  
+   specificity <- TN / (TN + FP)  
+   f1_score <- 2 * (precision * recall) / (precision + recall)        
+   mcc <- ifelse(  (TP + FP) * (TP + FN) * (TN + FP) * (TN + FN) == 0,0,((TP * TN) - (FP * FN)) / sqrt((TP + FP) * (TP + FN) * (TN + FP) * (TN + FN)))
+   names_vec <- c("mRNA", "lncRNA", "micRNA", "SNP", "microbe")
+   name <- names_vec[i]
+   results <- data.frame(
+    feature_method = name, 
+    Precision = precision,  
+    Recall = recall,  
+    Specificity = specificity,  
+    F1_Score = f1_score,  
+    MCC = mcc  
+   )
+   #if(i==1){
+   #     write.table(results, file = "5index.csv", sep = ",", row.names = FALSE, col.names = TRUE, append = TRUE)
+   #     print(results)
+   #}   
+   #else{
+   #     write.table(results, file = "5index.csv", sep = ",", row.names = FALSE, col.names = FALSE, append = TRUE)
+   #}
+   mcc_values[i] <- mcc         
+   print(paste("MCC:", mcc))       
+}
+first_five_values <- mcc_values[1:5]
+min_mcc_index <- which.min(first_five_values)
+paint_mcc <- mcc_values[min_mcc_index]
+mcc_values[min_mcc_index] <- 0
+total_mcc <- sum(mcc_values)
+mcc_pro_list <- list()
+for (i in 1:(length(mcc_values)-1)) {  
+    if (i != min_mcc_index) {  
+        mcc_pro_list[[i]] <- mcc_values[i]/total_mcc 
+    } 
+    else{
+        mcc_pro_list[[i]] <- 0
+    } 
+}
+sorted_indices <- order(first_five_values)
+second_smallest_index_sorted <- sorted_indices[2]
+min <- first_five_values[ second_smallest_index_sorted ]  
+max <- first_five_values[ which.max(first_five_values) ]  
+transfer_ratio <- max/(max+min) - min/(max+min) 
+transfer_amount  <- transfer_ratio * mcc_pro_list[[second_smallest_index_sorted]]  
+mcc_pro_list[[which.max(first_five_values)]] <- mcc_pro_list[[which.max(first_five_values)]] + transfer_amount
+mcc_pro_list[[second_smallest_index_sorted]] <- mcc_pro_list[[second_smallest_index_sorted]] - transfer_amount
+
+weighted_probs <- lapply(seq_along(pred_probs), function(i) {  
+   probs <- pred_probs[[i]]
+   weighted_probs_i <- ifelse(probs >= 0.5, 1* mcc_pro_list[[i]], 0)  
+   return(weighted_probs_i)    
+})
+combine_weighted_probs <- Reduce('+', weighted_probs)    
+#roc_obj <- roc(y_test, combine_weighted_probs[, 1],smooth=TRUE)
+
+roc_obj <- roc(y_test, combine_weighted_probs[, 1])
+auc_value <- auc(roc_obj)    
+print(auc_value)
+roc_objects[[6]] <- roc_obj
+
+#Retrain -> verify *********** according to the data of mcc ratio. Note that here is the result of mixing cdr with 5 indicators alone
+library(e1071)
+weighted_probs <- lapply(seq_along(pred_probs), function(i) {  
+   probs <- pred_probs[[i]]
+   weighted_probs_i <- ifelse(probs > 0.5, 1 * mcc_pro_list[[i]], -1 * mcc_pro_list[[i]])   
+   return(weighted_probs_i)    
+})
+weighted_2_probs <- lapply(seq_along(probs_2), function(i) {  
+   probs <- probs_2[[i]]
+   weighted_2_probs_i <- ifelse(probs > 0.5, 1 * mcc_pro_list[[i]], -1 * mcc_pro_list[[i]])  
+   return(weighted_2_probs_i)    
+})
+trainset <- trainset[, 1:2] 
+testset <- testset[, 1:2]   
+for (i in 1:length(file1)) {  
+   # Process the training set 
+   second_column <- trainset[, 2] 
+   col_name <- as.character(i) 
+   trainset[[col_name]] <- weighted_2_probs[[i]][, 2] 
+   testset[[col_name]] <- weighted_probs[[i]][, 2]  
+}
+#trainset <- trainset[,-(min_mcc_index+2)]
+#testset <- testset[,-(min_mcc_index+2)]
+
+#To deal with data sets, and the CDR and match them with the mmse * * * * * * * * * * * * * * * * * * * * * * * * * * * * note here is the result of the CDR separately mixed with five indicators
+combined_set <- rbind(trainset, testset)   
+cdr <- read.csv("deal_cdr.csv") 
+add_cdr_data <- left_join(cdr, combined_set, by = "sample")  
+add_cdr_data <- add_cdr_data%>% select(-4)
+current_colnames <- colnames(add_cdr_data)     
+current_colnames[2] <- "class"  
+colnames(add_cdr_data) <- current_colnames
+#Select trainset and testset again     # For a single cdr, look at the data table and find the first 15 behavioral training sets and the last 129 behavioral test sets
+trainset <- head(add_cdr_data, 15)  
+testset <- add_cdr_data[-(1:15), ]  
+#Random forest
+set.seed(666)
+train_features <- trainset[, -c(1, 2)]     
+train_labels <- trainset[, 2]  
+train_labels <- as.factor(train_labels)             
+test_features <- testset[, -c(1, 2)]       
+test_labels <- testset[, 2]    
+rf_model <- randomForest(train_features, train_labels)
+prob_predictions <- predict(rf_model, test_features, type = "prob")  
+pos_class_probs <- prob_predictions[, 2]    
+cdr_roc_obj <- roc(test_labels, pos_class_probs)  
+cdr_auc_value <- auc(cdr_roc_obj)
+print(paste("AUC:", cdr_auc_value))
+
+#Draw the results of mdr mixed separately with 5 features, and make random forests according to different columns in trainset and testset, and draw pictures
+set.seed(666)
+train_features <- trainset[, -c(1, 2)]     
+train_labels <- trainset[, 2]  
+train_labels <- as.factor(train_labels)             
+test_features <- testset[, -c(1, 2)]       
+test_labels <- testset[, 2]
+roc_cdr <- list()
+for (i in 2:6) {  
+  first_column <- train_features[, 1]  
+  ith_column <- train_features[, i]
+  x_train <- data.frame(first_column, ith_column)
+  first_column <- test_features[, 1]  
+  ith_column <- test_features[, i]
+  x_test <- data.frame(first_column, ith_column)
+  rf_model <- randomForest(x_train, train_labels)
+  prob_predictions <- predict(rf_model, x_test, type = "prob")  
+  pos_class_probs <- prob_predictions[, 2]    
+  s_cdr_roc_obj <- roc(test_labels, pos_class_probs)  
+  s_cdr_auc_value <- auc(s_cdr_roc_obj)
+  roc_cdr[[i-1]] <- s_cdr_roc_obj
+  print(paste("AUC:", s_cdr_auc_value))
+}
+
+temp = roc_cdr[[1]]  
+roc_cdr[[1]] = roc_cdr[[3]] 
+roc_cdr[[3]] = roc_cdr[[2]]  
+roc_cdr[[2]] = temp
+
+pdf("cdr_mix.pdf", width = 8, height = 8)
+old_par <- par(cex = 1.6)     
+colors <- c(  
+  "#3498DB",  
+  "#E74C3C",  
+  "#2ECC71",  
+  "#9B59B6",  
+  "#F39C12"    
+)
+
+plot(roc_cdr[[1]], main=" ", col=colors[1], lwd=3,legacy.axes=T,grid=c(0.2,0.2),grid.col=c("blue","blue")) 
+for (i in 2:5) {  
+  lines(roc_cdr[[i]], col=colors[i], lwd=3)# Add ROC curves for other files on the same graph
+}  
+auc_values <- sapply(roc_cdr, function(x) auc(x))
+custom_labels <- c("cf-mRNA + CDR:", "cf-lncRNA + CDR:","cf-micRNA + CDR:","SNP-based + CDR:","microbe-based + CDR:")
+legend_labels <- sprintf("%s AUC = %.3f", custom_labels, auc_values)     
+legend("bottomright", legend=legend_labels, fill=colors, bty="n", cex=0.8)
+par(old_par)
+dev.off()
+
+
+
+
+#--------------------------------------------------------------------------------------------
+#Retrain -> verify *********** according to the data of mcc proportion. Note that here is the result of mixing mmse alone with 5 indicators
+library(e1071)
+weighted_probs <- lapply(seq_along(pred_probs), function(i) {  
+   probs <- pred_probs[[i]]
+   weighted_probs_i <- ifelse(probs > 0.5, 1 * mcc_pro_list[[i]], -1 * mcc_pro_list[[i]])   
+   return(weighted_probs_i)    
+})
+weighted_2_probs <- lapply(seq_along(probs_2), function(i) {  
+   probs <- probs_2[[i]]
+   weighted_2_probs_i <- ifelse(probs > 0.5, 1 * mcc_pro_list[[i]], -1 * mcc_pro_list[[i]])  
+   return(weighted_2_probs_i)    
+})
+trainset <- trainset[, 1:2] 
+testset <- testset[, 1:2]   
+for (i in 1:length(file1)) {   
+   second_column <- trainset[, 2] 
+   col_name <- as.character(i) 
+   trainset[[col_name]] <- weighted_2_probs[[i]][, 2] 
+   testset[[col_name]] <- weighted_probs[[i]][, 2]  
+}
+#trainset <- trainset[,-(min_mcc_index+2)]
+#testset <- testset[,-(min_mcc_index+2)]
+
+#To deal with data sets, and the CDR and match them with the mmse * * * * * * * * * * * * * * * * * * * * * * * * * * * * note here is the result of the mmse separately mixed with five indicators
+combined_set <- rbind(trainset, testset)   
+cdr <- read.csv("deal_mmse.csv") 
+add_mmse_data <- left_join(cdr, combined_set, by = "sample")  
+add_mmse_data <- add_mmse_data%>% select(-4)
+current_colnames <- colnames(add_mmse_data)     
+current_colnames[2] <- "class"  
+colnames(add_mmse_data) <- current_colnames
+# For a single mmse, check the data table to find the first 60 behavior training sets and then all behavior test sets
+trainset <- head(add_mmse_data, 60)  
+testset <- add_mmse_data[-(1:60), ]  
+set.seed(666)
+train_features <- trainset[, -c(1, 2)]     
+train_labels <- trainset[, 2]  
+train_labels <- as.factor(train_labels)             
+test_features <- testset[, -c(1, 2)]       
+test_labels <- testset[, 2]    
+rf_model <- randomForest(train_features, train_labels)
+prob_predictions <- predict(rf_model, test_features, type = "prob")  
+pos_class_probs <- prob_predictions[, 2]    
+mmse_roc_obj <- roc(test_labels, pos_class_probs)  
+mmse_auc_value <- auc(mmse_roc_obj)
+print(paste("AUC:", mmse_auc_value))
+
+# Draw the results of mixing mmse with 5 features separately, and make random forests according to different columns in trainset and testset and draw pictures
+set.seed(666)
+train_features <- trainset[, -c(1, 2)]     
+train_labels <- trainset[, 2]  
+train_labels <- as.factor(train_labels)             
+test_features <- testset[, -c(1, 2)]       
+test_labels <- testset[, 2]
+roc_mmse <- list()
+for (i in 2:6) {  
+  first_column <- train_features[, 1]  
+  ith_column <- train_features[, i]
+  x_train <- data.frame(first_column, ith_column)
+  first_column <- test_features[, 1]  
+  ith_column <- test_features[, i]
+  x_test <- data.frame(first_column, ith_column)
+  rf_model <- randomForest(x_train, train_labels)
+  prob_predictions <- predict(rf_model, x_test, type = "prob")  
+  pos_class_probs <- prob_predictions[, 2]    
+  s_mmse_roc_obj <- roc(test_labels, pos_class_probs)  
+  s_mmse_auc_value <- auc(s_mmse_roc_obj)
+  roc_mmse[[i-1]] <- s_mmse_roc_obj
+  print(paste("AUC:", s_mmse_auc_value))
+}
+
+pdf("mmse_mix.pdf", width = 8, height = 8)
+old_par <- par(cex = 1.6)     
+colors <- c(  
+  "#3498DB",    
+  "#E74C3C",  
+  "#2ECC71",  
+  "#9B59B6",  
+  "#F39C12"  
+)
+
+temp = roc_mmse[[1]]  
+roc_mmse[[1]] = roc_mmse[[3]] 
+roc_mmse[[3]] = roc_mmse[[2]]  
+roc_mmse[[2]] = temp
+plot(roc_mmse[[1]], main=" ", col=colors[1], lwd=3,legacy.axes=T,grid=c(0.2,0.2),grid.col=c("blue","blue")) 
+for (i in 2:5) {  
+  lines(roc_mmse[[i]], col=colors[i], lwd=3) 
+}  
+auc_values <- sapply(roc_mmse, function(x) auc(x))
+custom_labels <- c("cf-mRNA + MMSE:", "cf-lncRNA + MMSE:","cf-micRNA + MMSE:","SNP-based + MMSE:","microbe-based + MMSE:")
+legend_labels <- sprintf("%s AUC = %.3f", custom_labels, auc_values)     
+legend("bottomright", legend=legend_labels, fill=colors, bty="n", cex=0.8)
+par(old_par)
+dev.off()
+
+
+pdf("total_M_C.pdf", width = 8, height = 8)
+old_par <- par(cex = 1.6)     
+colors <- c(  
+  "#007BFF",   
+  "#FF4500",  
+  "#4CAF50", 
+  "#9C27B0",   
+  "#FF9800",  
+  "black",   
+  "#CCCCFF",
+  "#66CCCC"  
+)
+temp = roc_objects[[1]]  
+roc_objects[[1]] = roc_objects[[3]] 
+roc_objects[[3]] = roc_objects[[2]]  
+roc_objects[[2]] = temp
+
+roc_objects[[8]] <- mmse_roc_obj
+roc_objects[[7]] <- cdr_roc_obj
+plot(roc_objects[[1]], main=" ", col=colors[1], lwd=3,legacy.axes=T,grid=c(0.2,0.2),grid.col=c("blue","blue"))   
+for (i in 2:8) {  
+  lines(roc_objects[[i]], col=colors[i], lwd=3) 
+}  
+auc_values <- sapply(roc_objects, function(x) auc(x))
+custom_labels <- c("cf-mRNA classifier:", "cf-lncRNA classifier:", "cf-micRNA classifier:", "SNP-based classifier:", "microbe-based classifier:", "cf-ensemble classifier:","all features + CDR:","all features + MMSE:")
+auc_values[7]<- cdr_auc_value
+auc_values[8]<- mmse_auc_value
+
+legend_labels <- sprintf("%s AUC = %.3f", custom_labels, auc_values)     
+legend("bottomright", legend=legend_labels, fill=colors, bty="n", cex=0.7)
+par(old_par)
+dev.off()
+
+
+

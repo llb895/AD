@@ -1,0 +1,75 @@
+library(ggplot2)  
+library(dplyr) 
+
+df <- read.csv("mrna_up_pathway.csv")  
+df$log_padj <- -log10(df$p.adjust)   
+p<-ggplot(df, aes(x = count, y = reorder(term, count), fill = log_padj)) +  
+  geom_bar(stat = "identity", position = position_dodge()) + 
+  scale_fill_gradient(low = "blue", high = "red") + 
+  labs(x = "Counts", y = "", fill = "log_padj") +  
+  theme_minimal() +
+  theme(  
+    axis.text.x = element_text(size = 18, face = "bold"),     
+    axis.text.y = element_text(size = 18, face = "bold"),   
+    axis.title.x = element_text(size = 18, face = "bold"),  
+    axis.title.y = element_text(size = 18, face = "bold"),  
+    legend.text = element_text(size = 18, face = "bold"),
+    legend.title = element_text(size = 18, face = "bold")  
+  )
+ggsave("S_mrna_up_pathway.pdf", plot = p, width = 15, height = 8, dpi = 300)  
+  
+
+df <- read.csv("mrna_down_pathway.csv")  
+df$log_padj <- -log10(df$p.adjust)   
+p<-ggplot(df, aes(x = count, y = reorder(term, count), fill = log_padj)) +  
+  geom_bar(stat = "identity", position = position_dodge()) + 
+  scale_fill_gradient(low = "blue", high = "red") + 
+  labs(x = "Counts", y = "", fill = "log_padj") +  
+  theme_minimal() + 
+  theme(  
+    axis.text.x = element_text(size = 25, face = "bold"),   
+    axis.text.y = element_text(size = 25, face = "bold"),   
+    axis.title.x = element_text(size = 25, face = "bold"), 
+    axis.title.y = element_text(size = 18, face = "bold"), 
+    legend.text = element_text(size = 18, face = "bold"),  
+    legend.title = element_text(size = 18, face = "bold")  
+  )
+ggsave("mrna_down_pathway.pdf", plot = p, width = 15, height = 8, dpi = 300)  
+  
+
+df <- read.csv("mirna_all_pathway.csv")  
+df$log_padj <- -log10(df$p.adjust)   
+p<-ggplot(df, aes(x = count, y = reorder(term, count), fill = log_padj)) +  
+  geom_bar(stat = "identity", position = position_dodge()) + 
+  scale_fill_gradient(low = "blue", high = "red") + 
+  labs(x = "Counts", y = "", fill = "log_padj") +  
+  theme_minimal() + 
+  theme(  
+    axis.text.x = element_text(size = 25, face = "bold"),   
+    axis.text.y = element_text(size = 25, face = "bold"),  
+    axis.title.x = element_text(size = 25, face = "bold"),  
+    axis.title.y = element_text(size = 18, face = "bold"), 
+    legend.text = element_text(size = 18, face = "bold"),   
+    legend.title = element_text(size = 18, face = "bold")   
+  )
+ggsave("mirna_all_pathway.pdf", plot = p, width = 15, height = 8, dpi = 300)  
+
+
+
+
+df <- read.csv("lncrna_all_pathway.csv")  
+df$log_padj <- -log10(df$p.adjust)   
+p<-ggplot(df, aes(x = count, y = reorder(term, count), fill = log_padj)) +  
+  geom_bar(stat = "identity", position = position_dodge()) + 
+  scale_fill_gradient(low = "blue", high = "red") + 
+  labs(x = "Counts", y = "", fill = "log_padj") +  
+  theme_minimal() + 
+  theme(  
+    axis.text.x = element_text(size = 25, face = "bold"),  
+    axis.text.y = element_text(size = 25, face = "bold"),   
+    axis.title.x = element_text(size = 25, face = "bold"),  
+    axis.title.y = element_text(size = 18, face = "bold"),  
+    legend.text = element_text(size = 18, face = "bold"),   
+    legend.title = element_text(size = 18, face = "bold")     
+  )
+ggsave("lncrna_all_pathway.pdf", plot = p, width = 15, height = 8, dpi = 300)          

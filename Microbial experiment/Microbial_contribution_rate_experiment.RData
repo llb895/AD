@@ -1,0 +1,41 @@
+library(ggplot2)
+df1 <- read.csv("microorganism.csv") 
+   
+df1$proportion <- df1$reads / df1$total
+
+group_A <- df1$proportion[df1$class == "AD"]    
+group_B <- df1$proportion[df1$class == "NCI"]
+# Wilcoxon rank sum test was performed
+wilcox_result <- wilcox.test(group_A, group_B, paired=FALSE)  
+print(wilcox_result)  
+  
+plot_data <- data.frame(  
+  reads_proportion = c(group_A, group_B), 
+  class = c(rep("AD", length(group_A)), rep("NCI", length(group_B)))  
+)  
+p_value <- wilcox_result$p.value  
+
+p <- ggplot(plot_data, aes(x=class, y=reads_proportion, fill=class)) +      
+  geom_violin() +    # replace geom_boxplot() Ϊ geom_violin()  
+  geom_boxplot(width = 0.1) + 
+  theme_minimal() +    
+  ggtitle("") +      
+ 
+  theme(panel.background = element_blank(),        
+        panel.grid.major = element_blank(),        
+        panel.grid.minor = element_blank(),      
+        axis.title.x = element_text(size = 18, face = "bold"),      
+        axis.title.y = element_text(size = 18, face = "bold"),        
+        axis.text.x = element_text(size = 15, face = "bold"),    
+        axis.text.y = element_text(size = 15, face = "bold"),     
+        plot.title = element_text(size = 25, face = "bold", hjust = 0.5),  
+        legend.text = element_text(size = 15),  
+        legend.key.size = unit(1.5, "cm"),  
+        axis.line = element_line(colour = "black", size = 1)   
+  ) +   
+  labs(x=" ", y="Reads Proportion") +   
+  annotate("text", x = 1.5, y = max(plot_data$reads_proportion) * 1.05,     
+           label = paste("Mann-Whitney, P =", round(p_value, 2)),     
+           size = 6, color = "black", fontface = "bold") +  
+  scale_fill_manual(values = c("NCI" = "#99CCFF", "AD" = "#FF99CC"),guide = "none")
+ggsave("Violin_abundance_test_AD_NCI.pdf", plot = p, width = 10, height = 8, dpi = 300)

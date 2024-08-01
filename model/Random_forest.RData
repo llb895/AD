@@ -1,0 +1,363 @@
+library(randomForest)  
+library(pROC)
+library(caret)  
+mcc_values <- numeric(6)  
+file1 <- c("1_reordered.select.csv", "2_reordered.select.csv", "3_reordered.select.csv", "4_reordered.select.csv", "5_reordered.select.csv")  
+roc_objects <- list()  
+auc_list <- list() 
+pred_probs <- list()
+probs_2 <- list()
+for (i in 1:length(file1)) {
+   data <-  read.csv(file1[i])
+   if(i==4){
+       data <-  read.csv("4selected_features.csv")
+   }
+   nrow_data <- nrow(data)
+   trainset <- data[1:120, ]   #Randomly divide 60% training and 40% test to calculate the mcc value, and reconstruct the mcc weight ratio
+   set.seed(123)   
+   train_size <- floor(0.6 * nrow(trainset))  
+   test_size <- nrow(trainset) - train_size   
+   shuffled_indices <- sample(1:nrow(trainset))    
+   train_indices <- shuffled_indices[1:train_size]  
+   test_indices <- shuffled_indices[(train_size+1):nrow(trainset)]  
+   mcc_new_trainset <- trainset[train_indices, ]  
+   mcc_new_testset <- trainset[test_indices, ]
+   mcc_x_train <- mcc_new_trainset[, -c(1, 2)]
+   mcc_y_train <- mcc_new_trainset[, 2]
+   mcc_y_train <- factor(mcc_y_train, labels = c("AD", "NCI"))
+   set.seed(999)
+   mcc_rf.train <- randomForest(x = mcc_x_train, y = mcc_y_train)
+   mcc_x_test <- mcc_new_testset[, -c(1, 2)]  # id is the first column and class is the second column
+   mcc_y_test <- mcc_new_testset[, 2] 
+   mcc_y_test <- factor(mcc_y_test, labels = c("AD", "NCI"))  
+   mcc_rf.test <- predict(mcc_rf.train, mcc_x_test, type = "prob") 
+   predicted_classes <- ifelse(mcc_rf.test[,1] >= 0.5, "AD", "NCI")      
+   TP <- sum(predicted_classes == "AD" & mcc_new_testset$class == "AD")  
+   FP <- sum(predicted_classes == "AD" & mcc_new_testset$class == "NCI")  
+   FN <- sum(predicted_classes == "NCI" & mcc_new_testset$class == "AD")  
+   TN <- sum(predicted_classes == "NCI" & mcc_new_testset$class == "NCI")     
+   mcc <- ifelse(  (TP + FP) * (TP + FN) * (TN + FP) * (TN + FN) == 0,0,((TP * TN) - (FP * FN)) / sqrt((TP + FP) * (TP + FN) * (TN + FP) * (TN + FN)))
+   mcc_values[i] <- mcc         
+   print(paste("MCC:", mcc))   
+   
+   testset <- data[121:nrow_data, ]
+   x_train <- trainset[, -c(1, 2)]  # id is the first column and class is the second column
+   y_train <- trainset[, 2] 
+   y_train <- factor(y_train, labels = c("AD", "NCI"))   
+   set.seed(999)             
+   rf.train <- randomForest(x = x_train, y = y_train)
+   x_test <- testset[, -c(1, 2)]  # id is the first column and class is the second column
+   y_test <- testset[, 2] 
+   y_test <- factor(y_test, labels = c("AD", "NCI"))  
+   rf.test1 <- predict(rf.train, x_train, type = "prob")     
+   probs_2[[i]] <- rf.test1   #The classification probability of the training set itself is obtained as the new training set feature data
+   rf.test2 <- predict(rf.train, x_test, type = "prob")
+   roc_objects[[i]] <- roc(y_test, rf.test2[,2])  
+   print(roc_objects[[i]])
+   pred_probs[[i]] <- rf.test2 
+   auc <- auc(roc_objects[[i]])
+   auc_list[i] <- auc   #below is the metrics saved into the csv code
+    
+   predicted_classes <- ifelse(rf.test2[,1] >= 0.5, "AD", "NCI")      
+   TP <- sum(predicted_classes == "AD" & testset$class == "AD")  
+   FP <- sum(predicted_classes == "AD" & testset$class == "NCI")  
+   FN <- sum(predicted_classes == "NCI" & testset$class == "AD")  
+   TN <- sum(predicted_classes == "NCI" & testset$class == "NCI")
+   precision <- TP / (TP + FP)  
+   recall <- TP / (TP + FN)  
+   specificity <- TN / (TN + FP)  
+   f1_score <- 2 * (precision * recall) / (precision + recall)        
+   mcc <- ifelse(  (TP + FP) * (TP + FN) * (TN + FP) * (TN + FN) == 0,0,((TP * TN) - (FP * FN)) / sqrt((TP + FP) * (TP + FN) * (TN + FP) * (TN + FN)))
+   names_vec <- c("mRNA", "lncRNA", "micRNA", "SNP", "microbe")
+   name <- names_vec[i]
+   results <- data.frame(
+    feature_method = name, 
+    Precision = precision,  
+    Recall = recall,  
+    Specificity = specificity,  
+    F1_Score = f1_score,  
+    MCC = mcc  
+   )
+   if(i==1){
+        write.table(results, file = "5Indicators.csv", sep = ",", row.names = FALSE, col.names = TRUE, append = TRUE)
+        print(results)
+   }   
+   else{
+        write.table(results, file = "5Indicators.csv", sep = ",", row.names = FALSE, col.names = FALSE, append = TRUE)
+   }
+   mcc_values[i] <- mcc         
+   print(paste("MCC:", mcc))       
+}
+first_five_values <- mcc_values[1:5]
+total_mcc <- sum(mcc_values)
+mcc_pro_list <- list()
+for (i in 1:(length(mcc_values))) {  
+    mcc_pro_list[[i]] <- mcc_values[i]/total_mcc 
+}
+sorted_indices <- order(first_five_values)
+second_smallest_index_sorted <- sorted_indices[2]
+min <- first_five_values[ second_smallest_index_sorted ]  
+max <- first_five_values[ which.max(first_five_values) ]  
+transfer_ratio <- max/(max+min) - min/(max+min) #The difference between the two is used as the amplification factor of the maximum mcc weight
+transfer_amount  <- transfer_ratio * mcc_pro_list[[second_smallest_index_sorted]]  #Multiply the coefficient by the minimum value to make the minimum value smaller, and add the maximum value to the transfer_amount to make the proportion increase
+mcc_pro_list[[which.max(first_five_values)]] <- mcc_pro_list[[which.max(first_five_values)]] + transfer_amount
+mcc_pro_list[[second_smallest_index_sorted]] <- mcc_pro_list[[second_smallest_index_sorted]] - transfer_amount
+
+weighted_probs <- lapply(seq_along(pred_probs), function(i) {  
+   probs <- pred_probs[[i]]
+   weighted_probs_i <- ifelse(probs >= 0.5, 1* mcc_pro_list[[i]], 0)  
+   return(weighted_probs_i)    
+})
+combine_weighted_probs <- Reduce('+', weighted_probs)    
+roc_obj <- roc(y_test, combine_weighted_probs[, 1])
+auc_value <- auc(roc_obj)    
+print(auc_value)
+roc_objects[[6]] <- roc_obj
+
+
+#paint
+
+pdf("lncRNA.pdf", width=8, height=8) 
+old_par <- par(cex = 1.6)  
+plot(roc_objects[[1]], col="#990000", lwd=3, legacy.axes=T, main="")
+auc_value <- auc(roc_objects[[1]])  
+formatted_auc <- formatC(auc_value, digits=3, format="f")   
+text(x=0.5, y=0.5, labels=paste("AUC =", formatted_auc), cex=1.2)
+par(old_par)
+dev.off()   
+
+pdf("miRNA.pdf", width=8, height=8)
+old_par <- par(cex = 1.6)  
+plot(roc_objects[[2]], col="#990000", lwd=3, legacy.axes=T, main="")
+auc_value <- auc(roc_objects[[2]])  
+formatted_auc <- formatC(auc_value, digits=3, format="f")   
+text(x=0.5, y=0.5, labels=paste("AUC =", formatted_auc), cex=1.2)
+par(old_par)
+dev.off() 
+
+pdf("mRNA.pdf", width=8, height=8)
+old_par <- par(cex = 1.6)  
+plot(roc_objects[[3]], col="#990000", lwd=3, legacy.axes=T, main="")
+auc_value <- auc(roc_objects[[3]])  
+formatted_auc <- formatC(auc_value, digits=3, format="f")   
+text(x=0.5, y=0.5, labels=paste("AUC =", formatted_auc), cex=1.2)
+par(old_par)
+dev.off()  
+ 
+pdf("SNP.pdf", width=8, height=8)
+old_par <- par(cex = 1.6)  
+plot(roc_objects[[4]], col="#990000", lwd=3, legacy.axes=T, main="")
+auc_value <- auc(roc_objects[[4]])  
+formatted_auc <- formatC(auc_value, digits=3, format="f")   
+text(x=0.5, y=0.5, labels=paste("AUC =", formatted_auc), cex=1.2)
+par(old_par)
+dev.off() 
+
+pdf("microbe.pdf", width=8, height=8)
+old_par <- par(cex = 1.6)  
+plot(roc_objects[[5]], col="#990000", lwd=3, legacy.axes=T, main="")
+auc_value <- auc(roc_objects[[5]])  
+formatted_auc <- formatC(auc_value, digits=3, format="f")   
+text(x=0.5, y=0.5, labels=paste("AUC =", formatted_auc), cex=1.2)
+par(old_par)
+dev.off() 
+
+pdf("Voting.pdf", width=8, height=8)
+old_par <- par(cex = 1.6)  
+plot(roc_objects[[6]], col="#990000", lwd=3, legacy.axes=T, main="")
+auc_value <- auc(roc_objects[[6]])  
+formatted_auc <- formatC(auc_value, digits=3, format="f")   
+text(x=0.5, y=0.5, labels=paste("AUC =", formatted_auc), cex=1.2)
+par(old_par)
+dev.off() 
+
+
+
+pdf("total.pdf", width = 8, height = 8)
+old_par <- par(cex = 1.6)     
+colors <- c(  
+  "#007BFF",    
+  "#FF4500",  
+  "#4CAF50",    
+  "#9C27B0",  
+  "#FF9800",  
+  "black"   
+)
+temp = roc_objects[[1]]  
+roc_objects[[1]] = roc_objects[[3]] 
+roc_objects[[3]] = roc_objects[[2]]  
+roc_objects[[2]] = temp
+plot(roc_objects[[1]], main="", col=colors[1], lwd=3,legacy.axes=T,grid=c(0.2,0.2),grid.col=c("blue","blue")) #Draw the ROC curve for the first file  
+for (i in 2:6) {  
+  lines(roc_objects[[i]], col=colors[i], lwd=3) # Add ROC curves for other files on the same graph
+}  
+auc_values <- sapply(roc_objects, function(x) auc(x))
+custom_labels <- c("cf-mRNA classifier:", "cf-lncRNA classifier:", "cf-micRNA classifier:", "SNP-based classifier:", "microbe-based classifier:", "cf-ensemble classifier:")
+formatted_auc_values <- sprintf("%.3f", auc_values)
+legend_labels <- paste(custom_labels, "AUC =", formatted_auc_values)   
+legend("bottomright", legend=legend_labels, fill=colors, bty="n", cex=0.8)
+par(old_par)
+dev.off()
+
+
+#*****************************************(step calculation) Calculate the weighted parameters
+mcc_values[min_mcc_index] <- paint_mcc
+# Convert weighted probabilities to prediction categories
+weighted_preds <- ifelse(combine_weighted_probs[, 1] > 0.5, 0, 1)  
+  
+# Calculate the confusion matrix
+confusion_matrix <- table(Prediction = weighted_preds, Actual = testset$class)  
+  
+# Extract TP, FP, TN, FN from the confusion matrix
+TP <- confusion_matrix[2, 2]  
+FP <- confusion_matrix[1, 2]  
+FN <- confusion_matrix[2, 1]  
+TN <- confusion_matrix[1, 1]  
+  
+# cal MCC (Matthews Correlation Coefficient)  
+mcc <- ((TP * TN) - (FP * FN)) / sqrt((TP + FP) * (TP + FN) * (TN + FP) * (TN + FN))  
+mcc_values[6] <- mcc
+mcc_values <- c(mcc_values[1], mcc_values[2], mcc_values[3], mcc_values[4], mcc_values[5], mcc_values[6])  
+files <- c("mrna", "lncrna", "micrna", "SNP", "microbe", "Hybrid")       
+filename <- "mcc_randomforest.png"    
+png(filename, width = 800, height = 800)      
+barplot(mcc_values, main = "MCC Values for Each File", ylab = "MCC", names.arg = files, ylim = c(min(min(mcc_values) - 0.1,0), max(mcc_values) + 0.1))  
+bar_coords <- barplot(mcc_values, plot = FALSE)  
+text(x = bar_coords, y = mcc_values, labels = round(mcc_values, 5), pos = 3, cex = 0.8)   
+dev.off()    
+  
+cat("MCC:", mcc, "\n")
+
+precision <- TP / (TP + FP)  
+recall <- TP / (TP + FN)  
+specificity <- TN / (TN + FP)  
+f1_score <- 2 * (precision * recall) / (precision + recall)        
+mcc <- ifelse(  (TP + FP) * (TP + FN) * (TN + FP) * (TN + FN) == 0,0,((TP * TN) - (FP * FN)) / sqrt((TP + FP) * (TP + FN) * (TN + FP) * (TN + FN)))
+results <- data.frame(
+  feature_method = "voting", 
+  Precision = precision,  
+  Recall = recall,  
+  Specificity = specificity,  
+  F1_Score = f1_score,  
+  MCC = mcc  
+)
+write.table(results, file = "5Indicators.csv",  sep = ",", row.names = FALSE, col.names = FALSE, append = TRUE)
+
+
+
+
+# ----------------------------------------------------------------------------------------------------------------------------------
+#other methods
+#Re-train with svm and other models according to mcc scale data -> verify
+library(e1071)
+weighted_probs <- lapply(seq_along(pred_probs), function(i) {  
+   probs <- pred_probs[[i]]
+   weighted_probs_i <- ifelse(probs > 0.5, 1 * mcc_pro_list[[i]], -1 * mcc_pro_list[[i]])   
+   return(weighted_probs_i)    
+})
+weighted_2_probs <- lapply(seq_along(probs_2), function(i) {  
+   probs <- probs_2[[i]]
+   weighted_2_probs_i <- ifelse(probs > 0.5, 1 * mcc_pro_list[[i]], -1 * mcc_pro_list[[i]])  
+   return(weighted_2_probs_i)    
+})
+trainset <- trainset[, 1:2] 
+testset <- testset[, 1:2]   
+for (i in 1:length(file1)) {  
+   #Processing training set 
+   second_column <- trainset[, 2] 
+   col_name <- as.character(i) 
+   trainset[[col_name]] <- weighted_2_probs[[i]][, 2] 
+   #Process verification set
+   testset[[col_name]] <- weighted_probs[[i]][, 2]  
+}
+trainset <- trainset[,-(min_mcc_index+2)]
+testset <- testset[,-(min_mcc_index+2)]
+#randomforest
+set.seed(666)
+train_features <- trainset[, -c(1, 2)]     
+train_labels <- trainset[, 2]  
+train_labels <- as.factor(train_labels)             
+test_features <- testset[, -c(1, 2)]       
+test_labels <- testset[, 2]    
+rf_model <- randomForest(train_features, train_labels)
+prob_predictions <- predict(rf_model, test_features, type = "prob")  
+pos_class_probs <- prob_predictions[, 2]    
+roc_obj <- roc(test_labels, pos_class_probs)  
+auc_value <- auc(roc_obj)
+print(paste("AUC:", auc_value))
+
+#svm    
+train_features <- trainset[, -c(1, 2)]   
+train_labels <- trainset[, 2]
+train_labels <- as.factor(train_labels)           
+test_features <- testset[, -c(1, 2)]     
+test_labels <- testset[, 2]
+test_labels <- as.factor(test_labels)            
+svm_model <- svm(train_features, train_labels, probability = TRUE)  
+prob_predictions <- predict(svm_model, test_features, probability = TRUE)
+attr_prob <- attr(prob_predictions, "probabilities")    
+pos_class_probs <- attr_prob[, 1]    
+test_labels <- factor(test_labels, levels = levels(train_labels))      
+roc_obj <- roc(test_labels, pos_class_probs)  
+auc_value <- auc(roc_obj)   
+print(paste("AUC:", auc_value)) 
+
+
+
+#mcc pro********************   auc:0.8574
+total_mcc <- mcc_values[1]+mcc_values[2]+mcc_values[3]+mcc_values[4]+mcc_values[5]
+mcc_pro_list <- list()
+mcc_pro_list[[1]] <- mcc_values[1]/total_mcc
+mcc_pro_list[[2]] <- mcc_values[2]/total_mcc
+mcc_pro_list[[3]] <- mcc_values[3]/total_mcc
+mcc_pro_list[[4]] <- mcc_values[4]/total_mcc
+mcc_pro_list[[5]] <- mcc_values[5]/total_mcc
+weighted_probs <- lapply(seq_along(pred_probs), function(i) {  
+   probs <- pred_probs[[i]]
+   weighted_probs_i <- ifelse(probs > 0.5, probs * mcc_pro_list[[i]], probs * mcc_pro_list[[i]])  
+   return(weighted_probs_i)    
+})
+weighted_probs <- Reduce('+', weighted_probs)       
+roc_obj <- roc(testset$class, weighted_probs[, -2])
+auc_value <- auc(roc_obj)    
+print(auc_value)
+roc_objects[[6]] <- roc_obj
+
+
+
+#0/1 (auc)    auc£º0.848
+auc_pro_list <- list()
+total_auc <- auc_list[[1]]+auc_list[[2]]+auc_list[[3]]+auc_list[[4]]+auc_list[[5]]
+auc_pro_list[[1]] <- auc_list[[1]]/total_auc
+auc_pro_list[[2]] <- auc_list[[2]]/total_auc
+auc_pro_list[[3]] <- auc_list[[3]]/total_auc
+auc_pro_list[[4]] <- auc_list[[4]]/total_auc
+auc_pro_list[[5]] <- auc_list[[5]]/total_auc
+weighted_probs <- lapply(seq_along(pred_probs), function(i) {  
+   probs <- pred_probs[[i]]
+   weighted_probs_i <- ifelse(probs >= 0.5, 1* auc_pro_list[[i]], 0)  
+   return(weighted_probs_i)    
+})
+weighted_probs <- Reduce('+', weighted_probs)      
+roc_obj <- roc(testset$class, weighted_probs[, -2])
+auc_value <- auc(roc_obj)    
+print(auc_value)
+roc_objects[[6]] <- roc_obj
+#pro (auc)   auc£º0.8405
+auc_pro_list <- list()
+total_auc <- auc_list[[1]]+auc_list[[2]]+auc_list[[3]]+auc_list[[4]]+auc_list[[5]]
+auc_pro_list[[1]] <- auc_list[[1]]/total_auc
+auc_pro_list[[2]] <- auc_list[[2]]/total_auc
+auc_pro_list[[3]] <- auc_list[[3]]/total_auc
+auc_pro_list[[4]] <- auc_list[[4]]/total_auc
+auc_pro_list[[5]] <- auc_list[[5]]/total_auc
+weighted_probs <- lapply(seq_along(pred_probs), function(i) {  
+   probs <- pred_probs[[i]]
+   weighted_probs_i <- ifelse(probs > 0.5, probs * auc_pro_list[[i]], probs * auc_pro_list[[i]])  
+   return(weighted_probs_i)    
+})
+weighted_probs <- Reduce('+', weighted_probs)      
+roc_obj <- roc(testset$class, weighted_probs[, -1])
+auc_value <- auc(roc_obj)    
+print(auc_value)
+roc_objects[[6]] <- roc_obj

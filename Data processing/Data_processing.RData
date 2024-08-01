@@ -1,0 +1,127 @@
+library(randomForest)  
+library(pROC)
+#Read different types of file data 
+data <- read.csv("1_reordered.csv")    
+  
+#Split data set
+nrow_data <- nrow(data) 
+training_set <- data[1:120, ]  # The first 120 rows serve as the training set
+validation_set <- data[121:nrow_data, ]  # The last 208 lines serve as the verification set
+  
+#Model construction
+x_train <- training_set[, -c(1, 2)]  #id is the first column and class is the second column
+y_train <- training_set[, 2] 
+y_train <- factor(y_train, labels = c("AD", "NCI"))
+set.seed(999) 
+rf_model <- randomForest(x = x_train, y = y_train) 
+# Verify the performance of all features
+x_test <- validation_set[, -c(1, 2)]  # id is the first column and class is the second column
+y_test <- validation_set[, 2] 
+y_test <- factor(y_test, labels = c("AD", "NCI"))  
+predictions <- predict(rf_model, x_test, type = "prob")     
+probs_ad <- predictions[, "AD"]
+
+predicted_classes <- ifelse(probs_ad >= 0.5, "AD", "NCI")      
+TP <- sum(predicted_classes == "AD" & y_test == "AD")  
+FP <- sum(predicted_classes == "AD" & y_test == "NCI")  
+FN <- sum(predicted_classes == "NCI" & y_test == "AD")  
+TN <- sum(predicted_classes == "NCI" & y_test == "NCI")      
+mcc <- ifelse(  (TP + FP) * (TP + FN) * (TN + FP) * (TN + FN) == 0,0,((TP * TN) - (FP * FN)) / sqrt((TP + FP) * (TP + FN) * (TN + FP) * (TN + FN)))
+   
+auc_value <- roc(y_test, probs_ad)$auc  
+print(paste("MCC for the selected features model:", mcc))
+
+# importance of computation
+importance_rf <- importance(rf_model) 
+#row.names(importance_rf) # See the importance of each featrue
+
+# Find the optimal threshold (***) 
+thresholds <- seq(min(importance_rf), max(importance_rf), length.out = 1000) # Search from min to max
+auc_values <- numeric(length(thresholds))  
+# Evaluate each threshold using cross-validation
+i=0  
+for (thr in thresholds) {
+  i <- i+1  
+  selected_features <- row.names(importance_rf)[importance_rf >= thr]
+  if(length(selected_features)<10){
+    next
+  }  
+  x_train_selected <- training_set[, c( selected_features)]
+  x_train_selected <- as.data.frame(x_train_selected)  # Convert to data box to prevent errors when only 1 column is converted to list type
+  if(ncol(x_train_selected) == 1){
+    colnames(x_train_selected) <- selected_features
+  } 
+  y_train <- factor(training_set[, 2], labels = c("AD", "NCI"))
+  set.seed(999)  
+  rf_model_selected <- randomForest(x = x_train_selected, y = y_train)   
+  x_val <- validation_set[, c(selected_features)]
+  x_val <- as.data.frame(x_val) # Convert to data box to prevent errors when only 1 column is converted to list type
+  if(ncol(x_val) == 1){
+    colnames(x_val) <- selected_features
+  }  
+  y_val <- factor(validation_set[, 2], labels = c("AD", "NCI"))  
+  predictions <- predict(rf_model_selected, x_val, type = "prob")     
+  probs_ad <- predictions[, "AD"] 
+  
+  predicted_classes <- ifelse(probs_ad >= 0.5, "AD", "NCI")      
+  TP <- sum(predicted_classes == "AD" & y_test == "AD")  
+  FP <- sum(predicted_classes == "AD" & y_test == "NCI")  
+  FN <- sum(predicted_classes == "NCI" & y_test == "AD")  
+  TN <- sum(predicted_classes == "NCI" & y_test == "NCI")      
+  mcc <- ifelse(  (TP + FP) * (TP + FN) * (TN + FP) * (TN + FN) == 0,0,((TP * TN) - (FP * FN)) / sqrt((TP + FP) * (TP + FN) * (TN + FP) * (TN + FN)))
+      
+  #auc_value <- roc(y_val, probs_ad)$auc
+  auc_values[i] <- mcc
+
+}  
+best_threshold_index <- which.max(auc_values)  
+best_threshold <- thresholds[best_threshold_index]  
+# Verify the random forest according to the optimal threshold 
+important_features <- row.names(importance_rf)[importance_rf >= best_threshold]
+
+
+# Verify the performance of the selected feature
+x_train_selected <- training_set[, c( important_features)]  
+y_train <- factor(training_set[, 2], labels = c("AD", "NCI")) 
+set.seed(999) 
+rf_model_selected <- randomForest(x = x_train_selected, y = y_train)   
+x_val <- validation_set[, c(important_features)]  
+y_val <- factor(validation_set[, 2], labels = c("AD", "NCI"))  
+predictions <- predict(rf_model_selected, x_val, type = "prob")     
+probs_ad <- predictions[, "AD"]   
+
+predicted_classes <- ifelse(probs_ad >= 0.5, "AD", "NCI")      
+TP <- sum(predicted_classes == "AD" & y_test == "AD")  
+FP <- sum(predicted_classes == "AD" & y_test == "NCI")  
+FN <- sum(predicted_classes == "NCI" & y_test == "AD")  
+TN <- sum(predicted_classes == "NCI" & y_test == "NCI")      
+mcc <- ifelse(  (TP + FP) * (TP + FN) * (TN + FP) * (TN + FN) == 0,0,((TP * TN) - (FP * FN)) / sqrt((TP + FP) * (TP + FN) * (TN + FP) * (TN + FN)))
+
+auc_value <- roc(y_val, probs_ad)$auc  
+print(paste("MCC for the selected features model:", mcc))
+
+
+
+# According to best_threshold, divide the file into 120 training, 208 verification, corresponding to the previous form
+selected_features <- row.names(importance_rf)[importance_rf >= best_threshold]
+
+fixed_columns <- c("gene_id", "class")  # ID column and category column
+# Then merge the selected features and fixed columns
+selected_columns <- c(fixed_columns, selected_features)  
+
+
+
+
+# processed as 1_reordered.select.csv
+data <- data[,selected_columns]
+write.csv(data, "4_reordered.select.csv", row.names = FALSE)
+#****************************************---------------------------------------------------------------------------------
+
+
+# Process as _120_1.csv and _208_1.csv
+training_set_selected <- training_set[, selected_columns, drop = FALSE]  
+validation_set_selected <- validation_set[, selected_columns, drop = FALSE]  
+
+# Write a new CSV file
+write.csv(training_set_selected, "_120_1.csv", row.names = FALSE)  
+write.csv(validation_set_selected, "_208_1.csv", row.names = FALSE)

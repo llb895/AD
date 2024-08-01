@@ -1,0 +1,90 @@
+library(ggplot2)  
+library(dplyr) 
+
+df <- read.csv("mrna_up_go.csv")  
+df$log_padj <- -log10(df$p.adjust)   
+min_count <- min(df$count)  
+max_count <- max(df$count)
+p<-ggplot(df, aes(x = enrichment, y = reorder(term, enrichment))) +  
+  geom_point(aes(size = count, color = log_padj), alpha = 0.7) +  
+  scale_size_continuous(range = c(min_count/2, max_count/2)) +  
+  scale_color_gradient(low = "blue", high = "red") +  
+  theme_minimal() +  
+  labs(x = "Enrichment", y = "", color = "-log10(p.adjust)", size = "Count") +  
+  theme(  
+    axis.text.x = element_text(size = 18, face = "bold"),   
+    axis.text.y = element_text(size = 18, face = "bold"),   
+    axis.title.x = element_text(size = 18, face = "bold"),  
+    axis.title.y = element_text(size = 18, face = "bold"),  
+    legend.text = element_text(size = 18, face = "bold"),  
+    legend.title = element_text(size = 18, face = "bold")   
+  )
+ggsave("mrna_up_go.pdf", plot = p, width = 15, height = 8, dpi = 300)  
+  
+  
+
+df <- read.csv("mrna_down_go.csv")  
+df$log_padj <- -log10(df$p.adjust)   
+min_count <- min(df$count)  
+max_count <- max(df$count)
+p<-ggplot(df, aes(x = enrichment, y = reorder(term, enrichment))) +  
+  geom_point(aes(size = count, color = log_padj), alpha = 0.7) +  
+  scale_size_continuous(range = c(min_count/6, max_count/6)) +  
+  scale_color_gradient(low = "blue", high = "red") +   
+  theme_minimal() +  
+  labs(x = "Enrichment", y = "", color = "-log10(p.adjust)", size = "Count") +  
+  theme(  
+    axis.text.x = element_text(size = 18, face = "bold"),   
+    axis.text.y = element_text(size = 18, face = "bold"),   
+    axis.title.x = element_text(size = 18, face = "bold"),  
+    axis.title.y = element_text(size = 18, face = "bold"),  
+    legend.text = element_text(size = 18, face = "bold"),   
+    legend.title = element_text(size = 18, face = "bold")   
+  )
+ggsave("mrna_down_go.pdf", plot = p, width = 15, height = 8, dpi = 300)  
+ 
+ 
+ 
+
+df <- read.csv("mirna_all_go.csv")  
+df$log_padj <- -log10(df$p.adjust)   
+min_count <- min(df$count)  
+max_count <- max(df$count)
+p<-ggplot(df, aes(x = enrichment, y = reorder(term, enrichment))) +  
+  geom_point(aes(size = count, color = log_padj), alpha = 0.7) + 
+  scale_size_continuous(range = c(min_count/5, max_count/5)) + 
+  scale_color_gradient(low = "blue", high = "red") +  
+  theme_minimal() + 
+  labs(x = "Enrichment", y = "", color = "-log10(p.adjust)", size = "Count") +  
+  theme(  
+    axis.text.x = element_text(size = 18, face = "bold"),  
+    axis.text.y = element_text(size = 18, face = "bold"),   
+    axis.title.x = element_text(size = 18, face = "bold"),  
+    axis.title.y = element_text(size = 18, face = "bold"),  
+    legend.text = element_text(size = 18, face = "bold"),   
+    legend.title = element_text(size = 18, face = "bold")  
+  )
+ggsave("mirna_all_go.pdf", plot = p, width = 15, height = 8, dpi = 300)  
+  
+  
+  
+df <- read.csv("lncrna_all_go.csv")  
+df$log_padj <- -log10(df$p.adjust)   
+min_count <- min(df$count)  
+max_count <- max(df$count)
+p<-ggplot(df, aes(x = enrichment, y = reorder(term, enrichment))) +  
+  geom_point(aes(size = count, color = log_padj), alpha = 0.7) +  
+  scale_size_continuous(range = c(min_count*4, max_count*4)) +  
+  scale_color_gradient(low = "blue", high = "red") + 
+  theme_minimal() + 
+  labs(x = "Enrichment", y = "", color = "-log10(p.adjust)", size = "Count") +  
+  theme(  
+    axis.text.x = element_text(size = 18, face = "bold"),  
+    axis.text.y = element_text(size = 18, face = "bold"),   
+    axis.title.x = element_text(size = 18, face = "bold"),   
+    axis.title.y = element_text(size = 18, face = "bold"),  
+    legend.text = element_text(size = 18, face = "bold"),   
+    legend.title = element_text(size = 18, face = "bold")   
+  )
+ggsave("lncrna_all_go.pdf", plot = p, width = 16, height = 8, dpi = 300)  
+    

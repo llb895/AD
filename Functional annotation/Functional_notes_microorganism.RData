@@ -1,0 +1,134 @@
+library(ggplot2)  
+library(dplyr)  
+   
+data <- read.csv("total.csv")
+
+data$class <- as.factor(data$class)
+microbes <- data[, 3:ncol(data)] 
+
+mean_proportions <- apply(microbes, 2, mean)
+AD_data <- microbes[data$class == "AD", ]  
+NCI_data <- microbes[data$class == "NCI", ]  
+   
+mean_proportions_AD <- apply(AD_data, 2, mean, na.rm = TRUE)  
+mean_proportions_NCI <- apply(NCI_data, 2, mean, na.rm = TRUE)  
+ 
+diff_data <- data.frame(  
+  Feature = names(mean_proportions_AD),  
+  Difference = mean_proportions_AD - mean_proportions_NCI,  
+  stringsAsFactors = FALSE  
+)  
+  
+#Initializes the vector used to store p-values and confidence intervals
+p_values <- numeric(length(mean_proportions_AD))  
+ci_lower <- numeric(length(mean_proportions_AD))  
+ci_upper <- numeric(length(mean_proportions_AD))  
+  
+# The T-test is performed for each feature and the confidence interval is calculated
+for (i in seq_along(mean_proportions_AD)) {  
+  feature <- names(mean_proportions_AD)[i]  
+    
+  #Perform t test  
+  tt <- t.test(microbes[data$class == "AD", feature],   
+               microbes[data$class == "NCI", feature],   
+               var.equal = TRUE)  
+    
+  #Stored p-value 
+  p_values[i] <- tt$p.value  
+    
+  # Calculate confidence intervals (95% confidence level)
+  n1 <- sum(data$class == "AD")  # Number of samples in group 1
+  n2 <- sum(data$class == "NCI") # # Number of samples in group2 
+  se <- sqrt(((n1 - 1) * var(microbes[data$class == "AD", feature], na.rm = TRUE) +   
+              (n2 - 1) * var(microbes[data$class == "NCI", feature], na.rm = TRUE)) /   
+             (n1 + n2 - 2)) * sqrt(1/n1 + 1/n2)  
+  ci_mult <- qt(0.975, df = n1 + n2 - 2)  # 97.5% quantile, corresponding to 95% confidence level
+  ci_lower[i] <- mean_proportions_AD[i] - ci_mult * se  
+  ci_upper[i] <- mean_proportions_AD[i] + ci_mult * se  
+}  
+  
+# Add the p-value and confidence interval to the diff_data data box
+diff_data$p_value <- p_values  
+diff_data$ci_lower <- ci_lower  
+diff_data$ci_upper <- ci_upper 
+ 
+pdf_filename <- "difference_mean_proportions.pdf"
+pdf(file = pdf_filename, width = 10, height = 6)   
+# Draw a bar chart to show the differences and add confidence intervals
+ggplot(diff_data, aes(x = Feature, y = Difference)) +  
+  geom_bar(stat = "identity", fill = "#ff4d40") +  
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0.25, colour = "black") +  
+  labs(title = " ", x = "", y = "Difference") +    
+  geom_text(aes(label = round(p_value, 3)), vjust = -0.5, colour = "red") +  
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1,size =, face = "bold"),   
+        axis.text.y = element_text(size = 12, face = "bold"),  
+        panel.border = element_blank(),     
+        panel.grid.major = element_blank(),  
+        panel.grid.minor = element_blank(),
+        axis.title.x = element_text(size = 12, face = "bold"), 
+        axis.title.y = element_text(size = 12, face = "bold"),
+        legend.text = element_text(size = 12, face = "bold"),
+        legend.title = element_text(size = 12, face = "bold"),  
+        plot.title = element_text(size = 12, face = "bold")) 
+dev.off()  
+
+diff_in_mean_proportions <- mean_proportions_AD - mean_proportions_NCI
+
+pdf_filename <- "mean_proportions_NCI.pdf"
+pdf(file = pdf_filename, width = 10, height = 6)    
+  
+long_data1 <- data.frame(  
+  Proportion = mean_proportions_NCI,  
+  Category = names(NCI_data),  
+  stringsAsFactors = FALSE  
+)  
+ 
+  
+long_data2 <- data.frame(  
+  Proportion = mean_proportions_AD,  
+  Category = names(AD_data),  
+  stringsAsFactors = FALSE 
+)    
+
+ggplot(long_data1, aes(x = Category, y = Proportion)) +  
+  geom_bar(stat = "identity", fill = "steelblue") + 
+  labs(title = " ", x = "", y = "Mean Proportion") +  
+  theme(axis.text.x = element_text(angle = 0, hjust = 1, size = rel(0.8))) +
+  coord_flip()+
+  scale_y_continuous(limits = c(0, 11000)) + 
+  theme(axis.text.x = element_text(angle = 0, hjust = 1, size = 16, face = "bold"),  
+        axis.text.y = element_text(size = 16, face = "bold"),  
+        panel.border = element_blank(),     
+        panel.grid.major = element_blank(),  
+        panel.grid.minor = element_blank(),
+        axis.title.x = element_text(size = 20, face = "bold"), 
+        axis.title.y = element_text(size = 20, face = "bold"),
+        legend.text = element_text(size = 14, face = "bold"),
+        legend.title = element_text(size = 14, face = "bold"),  
+        plot.title = element_text(size = 24, face = "bold")) 
+dev.off()
+
+#Draw a bar chart of the mean proportion
+pdf_filename <- "mean_proportions_AD.pdf"
+pdf(file = pdf_filename, width = 10, height = 6)   
+
+ggplot(long_data2, aes(x = Category, y = Proportion)) +  
+  geom_bar(stat = "identity", fill = "#ff4d40") +
+  labs(title = " ", x = "", y = "Mean Proportion") +  
+  theme(axis.text.x = element_text(angle = 0, hjust = 1, size = rel(0.8))) + 
+  coord_flip()+
+  scale_y_continuous(limits = c(0, 11000)) +
+  theme(axis.text.x = element_text(angle = 0, hjust = 1, size = 16, face = "bold"),  
+        axis.text.y = element_text(size = 16, face = "bold"),  
+        panel.border = element_blank(),     
+        panel.grid.major = element_blank(),  
+        panel.grid.minor = element_blank(),
+        axis.title.x = element_text(size = 20, face = "bold"), 
+        axis.title.y = element_text(size = 20, face = "bold"),
+        legend.text = element_text(size = 14, face = "bold"),
+        legend.title = element_text(size = 14, face = "bold"),  
+        plot.title = element_text(size = 24, face = "bold")) 
+dev.off()
+
+    

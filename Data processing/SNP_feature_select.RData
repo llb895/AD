@@ -1,0 +1,187 @@
+library(randomForest)  
+library(pROC)
+library(dplyr) 
+library(ggplot2)  
+# 1. Read SNP data 
+data <- read.csv("4_reordered.csv")    
+  
+# Split the data set
+nrow_data <- nrow(data) 
+training_set <- data[1:120, ]  # The first 120 lines are the training set 
+validation_set <- data[121:nrow_data, ]  # The next 208 lines are used as verification sets
+  
+# Model construction  
+x_train <- training_set[, -c(1, 2)]  #id is the first column and class is the second column  
+y_train <- training_set[, 2] 
+y_train <- factor(y_train, labels = c("AD", "NCI"))
+
+# Suppose we set a P-value threshold to select features
+p_value_threshold <- 0.01
+
+# For  SNP, you can write a loop to repeat the above process
+significant_features <- character()  
+for(feature in names(x_train)) {  
+  feature_table <- table(x_train[[feature]], y_train)  
+  chisq_result <- chisq.test(feature_table)  
+  if(chisq_result$p.value < p_value_threshold) {  
+    significant_features <- c(significant_features, feature)  
+  }  
+}  
+  
+selected_features_data <- data[, c("POS", "class", significant_features)]
+#write.csv(selected_features_data, "4selected_features.csv", row.names = FALSE)
+
+
+
+
+# Draw enrichment map
+cleaned_features <- sapply(significant_features, function(x) {   
+  cleaned_x <- substr(x, 2, nchar(x))  
+  as.numeric(cleaned_x)   
+})
+cleaned_features_array <- array(cleaned_features, dim = c(1, length(cleaned_features)))  
+  
+#The upper limit for each chromosome coordinate is listed,Chromosome length was extracted according to h19.fa
+chr1<-249250621
+chr2<-243199373
+chr3<-198022430
+chr4<-191154276
+chr5<-180915260
+chr6<-171115067
+chr7<-159138663
+chr8<-146364022
+chr9<-141213431
+chr10<-135534747
+chr11<-135006516
+chr12<-133851895
+chr13<-115169878
+chr14<-107349540
+chr15<-102531392
+chr16<-90354753
+chr17<-81195210
+chr18<-78077248
+chr19<-59128983
+chr20<-63025520
+chr21<-48129895
+chr22<-51304566
+chrX<-155270560
+chrY<-59373566
+
+total_inversions <- 0  
+split_index <- 1  # Initialize split index
+split_points <- c(1)  # Stores the index of the split point, initially at the start of the array
+  
+for (i in 1:(length(cleaned_features_array) - 1)) {  
+  print(cleaned_features_array[i])  
+  if (cleaned_features_array[i] > cleaned_features_array[i + 1]) {  
+    total_inversions <- total_inversions + 1  
+      
+   # When total_inversions are even, record the split point
+    if (total_inversions %% 2 == 0) {  
+      split_points <- c(split_points, i + 1)  
+      split_index <- i + 1  # Update the split index to the position after the current element
+    }  
+  }  
+}  
+  
+# Split the array into subarrays according to the split point
+sub_arrays <- list()  
+for (i in seq_along(split_points)[-1]) {  
+  start <- if (i == 1) 1 else split_points[i - 1] + 1  
+  end <- split_points[i]  
+  sub_arrays[[i]] <- cleaned_features_array[start:end - 1]  
+}  
+
+sub_arrays <- sub_arrays[-1]  
+# print 
+print(paste("Total inversions:", total_inversions))  
+print(sub_arrays)
+
+chromosomes <- c(paste0("chr", 1:22), "chrX", "chrY")
+
+chromosome_lengths <- c(249250621, 243199373, 198022430, 191154276, 180915260, 171115067,   
+                        159138663, 146364022, 141213431, 135534747, 135006516, 133851895,   
+                        115169878, 107349540, 102531392, 90354753, 81195210, 78077248,   
+                        59128983, 63025520, 48129895, 51304566, 155270560, 59373566)  
+to_df <- function(chr, positions) {  
+  data.frame(chr = rep(chr, length(positions)), position = positions)  
+} 
+df <- do.call(rbind, Map(to_df, chromosomes, sub_arrays)) 
+chr_names <- c(paste0("chr", as.character(1:22)), "chrX", "chrY")  
+chr_to_length <- setNames(chromosome_lengths, chr_names)
+df$line_length <- sapply(df$chr, function(chr) chr_to_length[chr]) 
+df <- df %>%  
+  filter(position <= line_length)
+df$chr <- factor(df$chr, levels = c("chr1", "chr2", "chr3","chr4", "chr5", "chr6","chr7", "chr8", "chr9","chr10", "chr11", "chr12","chr13", "chr14", "chr15","chr16", "chr17", "chr18", "chr19", "chr20", "chr21", "chr22", "chrX", "chrY"))
+
+p <-ggplot(df, aes(x = position, y = reorder(chr, position), color = chr)) +  
+  geom_point(size = 1.5) + 
+  annotate("segment", x = 0, xend = 249250621, y = "chr1", yend = "chr1", color = "black", size = 0.5) +  
+  annotate("segment", x = 0, xend = 243199373, y = "chr2", yend = "chr2", color = "black", size = 0.5) + 
+  annotate("segment", x = 0, xend = 198022430, y = "chr3", yend = "chr3", color = "black", size = 0.5) + 
+  annotate("segment", x = 0, xend = 191154276, y = "chr4", yend = "chr4", color = "black", size = 0.5) + 
+  annotate("segment", x = 0, xend = 180915260, y = "chr5", yend = "chr5", color = "black", size = 0.5) + 
+  annotate("segment", x = 0, xend = 171115067, y = "chr6", yend = "chr6", color = "black", size = 0.5) + 
+  annotate("segment", x = 0, xend = 159138663, y = "chr7", yend = "chr7", color = "black", size = 0.5) + 
+  annotate("segment", x = 0, xend = 146364022, y = "chr8", yend = "chr8", color = "black", size = 0.5) + 
+  annotate("segment", x = 0, xend = 141213431, y = "chr9", yend = "chr9", color = "black", size = 0.5) + 
+  annotate("segment", x = 0, xend = 135534747, y = "chr10", yend = "chr10", color = "black", size = 0.5) + 
+  annotate("segment", x = 0, xend = 135006516, y = "chr11", yend = "chr11", color = "black", size = 0.5) + 
+  annotate("segment", x = 0, xend = 133851895, y = "chr12", yend = "chr12", color = "black", size = 0.5) + 
+  annotate("segment", x = 0, xend = 115169878, y = "chr13", yend = "chr13", color = "black", size = 0.5) + 
+  annotate("segment", x = 0, xend = 107349540, y = "chr14", yend = "chr14", color = "black", size = 0.5) + 
+  annotate("segment", x = 0, xend = 102531392, y = "chr15", yend = "chr15", color = "black", size = 0.5) + 
+  annotate("segment", x = 0, xend = 90354753, y = "chr16", yend = "chr16", color = "black", size = 0.5) + 
+  annotate("segment", x = 0, xend = 81195210, y = "chr17", yend = "chr17", color = "black", size = 0.5) + 
+  annotate("segment", x = 0, xend = 78077248, y = "chr18", yend = "chr18", color = "black", size = 0.5) + 
+  annotate("segment", x = 0, xend = 59128983, y = "chr19", yend = "chr19", color = "black", size = 0.5) + 
+  annotate("segment", x = 0, xend = 63025520, y = "chr20", yend = "chr20", color = "black", size = 0.5) + 
+  annotate("segment", x = 0, xend = 48129895, y = "chr21", yend = "chr21", color = "black", size = 0.5) + 
+  annotate("segment", x = 0, xend = 51304566, y = "chr22", yend = "chr22", color = "black", size = 0.5) + 
+  annotate("segment", x = 0, xend = 155270560, y = "chrX", yend = "chrX", color = "black", size = 0.5) + 
+  annotate("segment", x = 0, xend = 59373566, y = "chrY", yend = "chrY", color = "black", size = 0.5) + 
+   
+  scale_y_discrete(limits = rev(unique(df$chr))) +  
+  theme_minimal() +
+  theme(  
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),   
+    axis.line = element_line(colour = "black"),
+    axis.text.x = element_text(angle = 0, size = 12, face = "bold"),  
+    axis.text.y = element_text(angle = 0, size = 12, face = "bold"),  
+    axis.title.x = element_text(angle = 0, size = 12, face = "bold"),  
+    axis.title.y = element_text(angle = 0, size = 12,  face = "bold"),
+    legend.position = "none" 
+  ) +    
+  labs(x = "Position", y = "", title = "",color = "") +  
+  theme(axis.text.y = element_text(angle = 0)) 
+ggsave("SNPenrichmentnew.pdf", plot = p, width = 8, height = 6, units = "in", dpi = 600)
+
+
+
+# Try random forest properties
+data <-  read.csv("4selected_features.csv")
+trainset <- data[1:120, ] 
+nrow_data <- nrow(data)
+trainset <- data[1:120, ]  # Randomly divide 60% training and 40% test to calculate the mcc value and reconstruct the mcc weight ratio
+set.seed(123)   
+train_size <- floor(0.6 * nrow(trainset))  
+test_size <- nrow(trainset) - train_size   
+shuffled_indices <- sample(1:nrow(trainset))    
+train_indices <- shuffled_indices[1:train_size]  
+test_indices <- shuffled_indices[(train_size+1):nrow(trainset)]  
+
+
+testset <- data[121:nrow_data, ]
+x_train <- trainset[, -c(1, 2)]  
+y_train <- trainset[, 2] 
+y_train <- factor(y_train, labels = c("AD", "NCI"))   
+set.seed(999)             
+rf.train <- randomForest(x = x_train, y = y_train)
+x_test <- testset[, -c(1, 2)]  
+y_test <- testset[, 2] 
+y_test <- factor(y_test, labels = c("AD", "NCI"))  
+rf.test1 <- predict(rf.train, x_train, type = "prob")     
+rf.test2 <- predict(rf.train, x_test, type = "prob")
+auc(roc(y_test, rf.test2[,2]) )
+

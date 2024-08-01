@@ -1,0 +1,408 @@
+library(caret)  
+library(randomForest)  
+library(pROC)  
+probs <- list()
+files <- paste0(1:5, "_reordered.select.csv") 
+predictions_probs <- list()
+predictions_probs2 <- list() 
+results <- list()   
+aucs <- list()
+auc_list <- list()
+all_predictions_list <- list()
+predictions_probs2 <- list()
+mcc_values <- numeric(5)
+k=0   
+for (file in files) { 
+  k <- k+1 
+  data <- read.csv(file) 
+  fixed_data <- data[1:120, ]
+  remaining_rows <- (121):(nrow(data))   
+  remain_data <- data[remaining_rows, ]     
+  sample_names <- remain_data[, 1]  
+  class <- remain_data[, 2]  
+  features <- remain_data[, -c(1, 2)]  
+  class_factor <- factor(class)   
+  df <- data.frame(remain_data)  
+  set.seed(666) 
+  # Initializes the list of probability predictions for each iteration -> score set
+  predictions_probs <- list()  
+  # Iterate 100 times to randomly divide the training set and validation set on the remaining data
+  for (i in 1:100) {  
+    set.seed(i)
+    trainIndex <- createDataPartition(df$class, p = 0.68, list = FALSE, times = 1)  
+    train_data <- df[trainIndex, ]   #The real training set was obtained by splicing the fixed data of 120 cases
+    train_data <- rbind(fixed_data, train_data)
+    test_data <- df[-trainIndex, ]
+    x_train <- train_data[, -c(1, 2)]
+    y_train <- train_data[, 2]
+    y_train <- factor(y_train, labels = c("AD", "NCI"))
+    x_test <- test_data[, -c(1, 2)]
+    test_rownames <- row.names(test_data)  
+    y_test <- test_data[, 2]
+    y_test <- factor(y_test, labels = c("AD", "NCI"))      
+    validation_data <- df[-trainIndex, ]   
+    rf_model <- randomForest(x = x_train, y = y_train)        
+    predictions_prob <- predict(rf_model, x_test, type = "prob")  
+    predictions_probs[[i]] <- list(prob = predictions_prob[, 2], y = y_test,id = test_rownames)   #y refers to the real label value!!
+  }  
+  
+  predictions_probs2[[k]] <- lapply(predictions_probs, function(x) x$prob) 
+  
+  all_predictions <- do.call(rbind, lapply(predictions_probs, function(x) {  
+    data.frame(prob = x$prob, y = as.numeric(x$y) - 1 , id = x$id)  # ¼ÙÉè"AD"ÊÇ1£¬"NCI"ÊÇ0  
+  })) 
+  all_predictions_list[[file]] <- all_predictions  
+  roc_obj <- roc(all_predictions$y, all_predictions$prob) 
+  results[[file]] <- roc_obj
+  auc_list[k] <- auc(roc_obj) 
+  print(auc(roc_obj) )
+  predicted_classes <- ifelse(all_predictions$prob >= 0.5, "1", "0")      
+  TP <- sum(predicted_classes == "1" & all_predictions$y == "1")  
+  FP <- sum(predicted_classes == "1" & all_predictions$y == "0")  
+  FN <- sum(predicted_classes == "0" & all_predictions$y == "1")  
+  TN <- sum(predicted_classes == "0" & all_predictions$y == "0") 
+  
+  t <- as.numeric((TP + FP)) * as.numeric((TP + FN)) * as.numeric((TN + FP)) * as.numeric((TN + FN))     
+  mcc <- ifelse(  t == 0,0,((TP * TN) - (FP * FN)) / sqrt(t))
+  mcc_values[k] <- mcc         
+  print(paste("MCC:", mcc)) 
+} 
+
+#Backtracking algorithm
+generate_subsequences_with_indices <- function(values, length) {    
+  result <- list()     
+  generate_comb <- function(remaining, current_indices, current_values, index) {    
+    if (length(current_values) == length) {      
+      result <<- c(result, list(list(indices = current_indices, values = current_values)))    
+    } else if (index <= length(remaining)) {     
+      generate_comb(remaining, c(current_indices, index), c(current_values, remaining[index]), index + 1)      
+      generate_comb(remaining, current_indices, current_values, index + 1)    
+    }    
+  }      
+  generate_comb(values, vector(), vector(), 1)    
+  return(result)    
+}
+#------------------------------------------------The above is a backtracking algorithm
+#------------------------------ The following 2 features _ Draw a box plot
+aucs_2 <- list()
+aucs_2_t <- list()
+subsequences_list <- generate_subsequences_with_indices(mcc_values, 2)  
+for (k in (1:length(subsequences_list))) {  
+  values_subsequence <- as.numeric(subsequences_list[[k]][2]$values) #The subset containing mcc is obtained
+  indices_subsequence <- as.numeric(subsequences_list[[k]][1]$indices)#Obtains the original subscript of the elements in the mcc subset in mcc_values
+  total_mcc <- sum(values_subsequence)
+  mcc_pro_list <- list()
+  #Calculated weight ratio
+  for (i in 1:length(values_subsequence)){   
+     mcc_pro_list[[i]] <- values_subsequence[i]/total_mcc  
+  }
+  #Calculate the weighted probability
+  predictions_probs_t <- vector("list", length(indices_subsequence))  
+  for (i in 1:5) {  
+      predictions_probs_t[[i]] <- vector("list", 100) # Initialize 100 empty locations for each sublist
+  } 
+  for(m in 1:2){
+      for(d in 1:100){
+          predictions_probs_t[[indices_subsequence[m]]][[d]] <- ifelse(predictions_probs2[[indices_subsequence[m]]][[d]] >= 0.5, 1* mcc_pro_list[[m]], 0) 
+      }
+  } 
+  merged_probs <- vector("list", 1)
+  merged_probs[[1]] <- vector("list", 100)  
+  for (d in 1:100) {  
+    merged_probs[[d]] <- predictions_probs_t[[indices_subsequence[1]]][[d]] + predictions_probs_t[[indices_subsequence[2]]][[d]] 
+    ids_to_find <- names(merged_probs[[d]]) 
+    fixed_train_data <- data[rownames(data) %in% ids_to_find, ]  
+    roc_obj <- roc(fixed_train_data$class, merged_probs[[d]]) 
+    auc_value <- auc(roc_obj)
+    aucs_2_t[[d]]  <- auc_value
+  } 
+  indices_subsequence_str <- paste(as.character(indices_subsequence), collapse = " ")  
+  aucs_2[[indices_subsequence_str]] <- aucs_2_t
+}
+#The following method is similar to the first one
+#------------------------------The following 3 features _ Draw a box plot
+aucs_3 <- list()
+aucs_3_t <- list()
+subsequences_list <- generate_subsequences_with_indices(mcc_values, 3)  
+for (k in (1:length(subsequences_list))) {  
+  values_subsequence <- as.numeric(subsequences_list[[k]][2]$values) 
+  indices_subsequence <- as.numeric(subsequences_list[[k]][1]$indices)
+  total_mcc <- sum(values_subsequence)
+  mcc_pro_list <- list()
+  for (i in 1:length(values_subsequence)){   
+     mcc_pro_list[[i]] <- values_subsequence[i]/total_mcc  
+  }
+  predictions_probs_t <- vector("list", length(indices_subsequence))  
+  for (i in 1:5) {  
+      predictions_probs_t[[i]] <- vector("list", 100) 
+  } 
+  for(m in 1:3){
+      for(d in 1:100){
+          predictions_probs_t[[indices_subsequence[m]]][[d]] <- ifelse(predictions_probs2[[indices_subsequence[m]]][[d]] >= 0.5, 1* mcc_pro_list[[m]], 0) 
+      }
+  } 
+  merged_probs <- vector("list", 1)
+  merged_probs[[1]] <- vector("list", 100)  
+  for (d in 1:100) {  
+    merged_probs[[d]] <- predictions_probs_t[[indices_subsequence[1]]][[d]] + predictions_probs_t[[indices_subsequence[2]]][[d]] +predictions_probs_t[[indices_subsequence[3]]][[d]] 
+    ids_to_find <- names(merged_probs[[d]]) 
+    fixed_train_data <- data[rownames(data) %in% ids_to_find, ] 
+    roc_obj <- roc(fixed_train_data$class, merged_probs[[d]]) 
+    auc_value <- auc(roc_obj)
+    aucs_3_t[[d]]  <- auc_value
+  } 
+  indices_subsequence_str <- paste(as.character(indices_subsequence), collapse = " ")  
+  aucs_3[[indices_subsequence_str]] <- aucs_3_t
+}
+
+#------------------------------The following 4 features _ Draw a box plot
+aucs_4 <- list()
+aucs_4_t <- list()
+subsequences_list <- generate_subsequences_with_indices(mcc_values, 4)  
+for (k in (1:length(subsequences_list))) {  
+  values_subsequence <- as.numeric(subsequences_list[[k]][2]$values) 
+  indices_subsequence <- as.numeric(subsequences_list[[k]][1]$indices)
+  total_mcc <- sum(values_subsequence)
+  mcc_pro_list <- list()
+  for (i in 1:length(values_subsequence)){   
+     mcc_pro_list[[i]] <- values_subsequence[i]/total_mcc  
+  }
+  predictions_probs_t <- vector("list", length(indices_subsequence))  
+  for (i in 1:5) {  
+      predictions_probs_t[[i]] <- vector("list", 100) 
+  } 
+  for(m in 1:4){
+      for(d in 1:100){
+          predictions_probs_t[[indices_subsequence[m]]][[d]] <- ifelse(predictions_probs2[[indices_subsequence[m]]][[d]] >= 0.5, 1* mcc_pro_list[[m]], 0) 
+      }
+  } 
+  merged_probs <- vector("list", 1)
+  merged_probs[[1]] <- vector("list", 100)  
+  for (d in 1:100) {  
+    merged_probs[[d]] <- predictions_probs_t[[indices_subsequence[1]]][[d]] + predictions_probs_t[[indices_subsequence[2]]][[d]] +predictions_probs_t[[indices_subsequence[3]]][[d]]+predictions_probs_t[[indices_subsequence[4]]][[d]] 
+    ids_to_find <- names(merged_probs[[d]]) 
+    fixed_train_data <- data[rownames(data) %in% ids_to_find, ] 
+    roc_obj <- roc(fixed_train_data$class, merged_probs[[d]]) 
+    auc_value <- auc(roc_obj)
+    aucs_4_t[[d]]  <- auc_value
+  } 
+  indices_subsequence_str <- paste(as.character(indices_subsequence), collapse = " ")  
+  aucs_4[[indices_subsequence_str]] <- aucs_4_t
+}
+#------------------------------The following 5 features _ Draw a box plot
+aucs_5 <- list()
+aucs_5_t <- list()
+subsequences_list <- generate_subsequences_with_indices(mcc_values, 5)  
+for (k in (1:length(subsequences_list))) {  
+  values_subsequence <- as.numeric(subsequences_list[[k]][2]$values) 
+  indices_subsequence <- as.numeric(subsequences_list[[k]][1]$indices)
+  total_mcc <- sum(values_subsequence)
+  mcc_pro_list <- list()
+  for (i in 1:length(values_subsequence)){   
+     mcc_pro_list[[i]] <- values_subsequence[i]/total_mcc  
+  }
+  predictions_probs_t <- vector("list", length(indices_subsequence))  
+  for (i in 1:5) {  
+      predictions_probs_t[[i]] <- vector("list", 100) 
+  } 
+  for(m in 1:5){
+      for(d in 1:100){
+          predictions_probs_t[[indices_subsequence[m]]][[d]] <- ifelse(predictions_probs2[[indices_subsequence[m]]][[d]] >= 0.5, 1* mcc_pro_list[[m]], 0) 
+      }
+  } 
+  merged_probs <- vector("list", 1)
+  merged_probs[[1]] <- vector("list", 100)  
+  for (d in 1:100) {  
+    merged_probs[[d]] <- predictions_probs_t[[indices_subsequence[1]]][[d]] + predictions_probs_t[[indices_subsequence[2]]][[d]] +predictions_probs_t[[indices_subsequence[3]]][[d]]+predictions_probs_t[[indices_subsequence[4]]][[d]]+predictions_probs_t[[indices_subsequence[5]]][[d]]
+    ids_to_find <- names(merged_probs[[d]]) 
+    fixed_train_data <- data[rownames(data) %in% ids_to_find, ] 
+    roc_obj <- roc(fixed_train_data$class, merged_probs[[d]]) 
+    auc_value <- auc(roc_obj)
+    aucs_5_t[[d]]  <- auc_value
+  } 
+  indices_subsequence_str <- paste(as.character(indices_subsequence), collapse = " ")  
+  aucs_5[[indices_subsequence_str]] <- aucs_5_t
+}
+#------------------------------The following 1 features _ Draw a box plot
+aucs_1 <- list()
+aucs_1_t <- list()
+subsequences_list <- generate_subsequences_with_indices(mcc_values, 1)  
+for (k in (1:length(subsequences_list))) {  
+  values_subsequence <- as.numeric(subsequences_list[[k]][2]$values) 
+  indices_subsequence <- as.numeric(subsequences_list[[k]][1]$indices)
+  total_mcc <- sum(values_subsequence)
+  mcc_pro_list <- list()
+  for (i in 1:length(values_subsequence)){   
+     mcc_pro_list[[i]] <- values_subsequence[i]/total_mcc  
+  }
+  predictions_probs_t <- vector("list", length(indices_subsequence))  
+  for (i in 1:5) {  
+      predictions_probs_t[[i]] <- vector("list", 100)
+  } 
+  for(m in 1:1){
+      for(d in 1:100){
+          predictions_probs_t[[indices_subsequence[m]]][[d]] <- ifelse(predictions_probs2[[indices_subsequence[m]]][[d]] >= 0.5, 1* mcc_pro_list[[m]], 0) 
+      }
+  } 
+  merged_probs <- vector("list", 1)
+  merged_probs[[1]] <- vector("list", 100)  
+  for (d in 1:100) {  
+    merged_probs[[d]] <- predictions_probs_t[[indices_subsequence[1]]][[d]]
+    roc_obj <- roc(fixed_train_data$class, merged_probs[[d]]) 
+    auc_value <- auc(roc_obj)
+    aucs_1_t[[d]]  <- auc_value
+  } 
+  indices_subsequence_str <- paste(as.character(indices_subsequence), collapse = " ")  
+  aucs_1[[indices_subsequence_str]] <- aucs_1_t
+}
+#-----------auc_1,auc_2,auc_3,auc_4,auc_5, the first dimension is numbers. For example, "1, 2, 3" means the mixed features 1, 2, 3, and the second dimension is the auc value after the mixed features. There are 100 random values for 100 times in total, which is used to construct scatter box plots
+#Drawing process
+convert_and_concatenate <- function(string_with_numbers) {  
+  numbers <- as.numeric(unlist(strsplit(string_with_numbers, " ")))  
+  mapping <- list(  
+    "1" = "lncRNA",  
+    "2" = "mRNA",  
+    "3" = "miRNA",  
+    "4" = "SNP",  
+    "5" = "microbe"  
+  )  
+  converted_strings <- sapply(numbers, function(num) mapping[as.character(num)])  
+  result <- paste(converted_strings, collapse = "+")  
+  return(result)  
+}
+calculate_p_value <- function(group1, group2) { #Calculating p-value
+  test_result <- wilcox.test(group1, group2)
+  return(test_result$p.value)  
+}
+#Draw bar diagram (consider only microorganisms) 
+painter_bar <- function(string , long_string , num , names_i_auc_list , long_names_i_auc_list) {    # Output 100 auc values based on the passed string id and draw a scatterbox plot
+  library(ggplot2)   
+  auc_values_string <- unlist(names_i_auc_list[[string]], use.names = FALSE)  
+  auc_values_long_string <- unlist(long_names_i_auc_list[[long_string]], use.names = FALSE)  
+  p_value <- calculate_p_value(auc_values_string, auc_values_long_string)
+  p_value_formatted <- formatC(p_value, format = "e", digits = 2)  
+  name1 <- convert_and_concatenate(string)
+  print(name1) 
+  name2 <- convert_and_concatenate(long_string) 
+  print(name2) 
+  df <- data.frame(  
+    Group = factor(rep(c(name1, name2), each = length(auc_values_string)), levels = c(name1, name2)),  
+    AUC = c(auc_values_string, auc_values_long_string)  
+  ) 
+#Box plotting
+  p <- ggplot(df, aes(x = Group, y = AUC)) +    
+    geom_boxplot(width = 0.5) +    
+    geom_jitter(width = 0.2,colour = "plum" ,height = 0, color = "plum", size = 3, alpha = 0.5) +  # Scatter diagram (dithered) lncrna was coral, mirna lightseagreen,mrna plum,SNP skyblue
+    theme_minimal() +    
+    labs(x = "", y = "AUC", title = "")+
+    annotate("text", x = 1.75, y = Inf,   
+             label = paste("p =", p_value_formatted),   
+             vjust = 1.5, hjust = 1, color = "black", size = 8
+             )  +  
+    theme(axis.text.x = element_text(size = 12, face = "bold"), 
+          axis.text.y = element_text(size = 18, face = "bold"), 
+          axis.title.y = element_text(size = 22, face = "bold"))
+  numbers_list1 <- strsplit(string, " ")[[1]]
+  numbers_list2 <- strsplit(long_string, " ")[[1]]  
+  new_str1 <- paste(numbers_list1, collapse = "_") 
+  new_str2 <- paste(numbers_list2, collapse = "_")  
+  name <- paste0("/bar/" ,new_str1,"--", new_str2,"--auc.pdf" ) 
+  ggsave(name, plot = p, width = 8, height = 6, dpi = 600)
+} 
+
+#Draw a csv table 
+painter_csv <- function(string , long_string , num , names_i_auc_list , long_names_i_auc_list) {    
+  library(ggplot2)   
+  auc_values_string <- unlist(names_i_auc_list[[string]], use.names = FALSE)
+  mean_auc_string <- mean(auc_values_string)  
+  auc_values_long_string <- unlist(long_names_i_auc_list[[long_string]], use.names = FALSE) 
+  mean_auc_long_string <- mean(auc_values_long_string)    
+  p_value <- calculate_p_value(auc_values_string, auc_values_long_string)
+  p_value_formatted <- formatC(p_value, format = "e", digits = 3)  
+  name1 <- convert_and_concatenate(string) 
+  name2 <- convert_and_concatenate(long_string)
+  df <- data.frame(  
+    feature1 = name1,  
+    mean_auc_string = mean_auc_string,  
+    feature2 = name2,  
+    mean_auc_long_string = mean_auc_long_string,  
+    p = p_value_formatted  
+  )   
+  csv_file_path <- paste0("/bar/", as.character(num), ".csv")  
+    
+  # If the file already exists, read it into a data box
+  if (file.exists(csv_file_path)) {  
+    old_df <- read.csv(csv_file_path, stringsAsFactors = FALSE)  
+    # Appends new data to the bottom of the old data box  
+    df_to_write <- rbind(old_df, df)  
+  } else {  
+    #If the file does not exist, use the new data frame  
+    df_to_write <- df  
+  }  
+  # Write the data box back to the file
+  write.csv(df_to_write, csv_file_path, row.names = FALSE)  
+}
+
+auc_list_names <- c("aucs_1", "aucs_2", "aucs_3", "aucs_4", "aucs_5")  
+for(i in 1:4){
+  names_i_auc_list <- get(auc_list_names[i])
+  names_i <- names(names_i_auc_list)
+  k <- i+1
+  names_k_auc_list <- get(auc_list_names[k])
+  names_k <- names(names_k_auc_list)
+  for(j in 1:length(names_i)){
+    for(k in 1:length(names_k)){  
+      # Split a string into numeric vectors 
+      names_ii <- as.numeric(unlist(strsplit(names_i[j], " ")))  
+      names_kk <- as.numeric(unlist(strsplit(names_k[k], " ")))  
+      key <- 0
+      for(z in 1:length(names_ii)){
+        for(p in 1:length(names_kk)){
+          if(names_ii[z] == names_kk[p]){
+            key <- key+1
+          }
+        }      
+      }
+      if(key == length(names_kk) - 1){     
+        num <- setdiff(names_kk, names_ii) #Feature subscripts 1, 2, 3, 4, 5 are used for comparison
+        if(num ==5){ #Microbiological considerations  #Choose the painter_bar or painter_csv function to control the drawing of csv files or pdf graphs and select features based on num values
+          painter_bar(names_i[j],names_k[k],num,get(auc_list_names[i]),get(auc_list_names[i+1]))
+        }
+        #if(num ==1){
+        #  painter_csv(names_i[j],names_k[k],num,get(auc_list_names[i]),get(auc_list_names[i+1]))
+        #}
+        #if(num ==2){
+        #  painter_csv(names_i[j],names_k[k],num,get(auc_list_names[i]),get(auc_list_names[i+1]))
+        #} 
+        #if(num ==3){
+        #  painter_csv(names_i[j],names_k[k],num,get(auc_list_names[i]),get(auc_list_names[i+1]))
+        #} 
+        #if(num ==4){
+        #  painter_csv(names_i[j],names_k[k],num,get(auc_list_names[i]),get(auc_list_names[i+1]))
+        #} 
+        #if(num ==5){
+        #  painter_csv(names_i[j],names_k[k],num,get(auc_list_names[i]),get(auc_list_names[i+1]))
+        #}         
+      }
+             
+    }
+  }
+}
+ 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

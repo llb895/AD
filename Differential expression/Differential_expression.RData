@@ -1,0 +1,93 @@
+#Volcano mapping and analysis of differentially expressed genes
+data <- read.csv("1_reordered.csv", stringsAsFactors = FALSE)     #Choose to read different feature csv files
+ids <- data[, 1]  
+classes <- data[, 2]  
+features <- data[, -c(1, 2)]  
+    
+classes <- factor(classes, levels = c("AD", "NCI"))
+t_values <- numeric(ncol(features))  
+p_values <- numeric(ncol(features))  
+  
+# Use lapply instead of apply because we need to work with list results
+for (i in 1:ncol(features)) {  
+  #Apply T.EST to each column
+  test_result <- t.test(features[, i] ~ classes)  
+  t_values[i] <- test_result$statistic  
+  p_values[i] <- test_result$p.value  
+}  
+  
+#store the results in a data box
+t_results <- data.frame(t = t_values, p.value = p_values)  
+  
+nci_mean <- colMeans(features[classes == "NCI", ])  
+ad_mean <- colMeans(features[classes == "AD", ])  
+log2fc <- log2(nci_mean / ad_mean)
+
+#Volcano mapping
+library(ggplot2)  
+  
+volcano_data <- data.frame(log2FC = log2fc, log10p = -log10(p_values))
+volcano_data$log2FC[volcano_data$log2FC < -10] <- -1
+volcano_data$log2FC[volcano_data$log2FC > 10] <- 1
+
+volcano_data_clean <- volcano_data[!is.na(volcano_data$log2FC) & !is.na(volcano_data$log10p), ]
+volcano_data <- volcano_data_clean
+
+volcano_data$direction <- ifelse(volcano_data$log2FC > 1 , "Up", ifelse(volcano_data$log2FC < -1 , "Down", "Other"))  
+
+x_range <- range(volcano_data$log2FC)  
+# Here we use 0 as the center of the range
+center <- 0  
+#Calculate the new ranges and make sure they are symmetric about the center
+symmetric_limits <- c(-abs(max(c(abs(x_range[1]) - center), abs(center - x_range[2]))),   
+                      abs(max(c(abs(x_range[1]) - center), abs(center - x_range[2])))) + center  
+  
+ 
+p <- ggplot(volcano_data, aes(x = log2FC, y = log10p)) +          
+  geom_point(alpha = 0.6, aes(color = direction)) +        
+  scale_color_manual(values = c("Up" = "firebrick", "Down" = "deepskyblue", "Other" = "darkgrey")) + 
+  scale_x_continuous(breaks = seq(-4, 4, by = 2))+      
+  theme_minimal() +          
+  xlab("Log2 Fold Change") +          
+  ylab("-Log10(p-value)") +              
+  geom_vline(xintercept = c(-1, 1), color = "black", linetype = "dashed") +         
+  theme(axis.text.x = element_text(angle = 0, hjust = 1, size = 16),  
+        axis.text.y = element_text(size = 16),  
+        panel.border = element_blank(),     
+        panel.grid.major = element_blank(),  
+        panel.grid.minor = element_blank(),
+        axis.title.x = element_text(size = 20), 
+        axis.title.y = element_text(size = 20),
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 14),  
+        plot.title = element_text(size = 24)) + 
+  annotate("rect", xmin = Inf, xmax = -Inf, ymin = Inf, ymax = -Inf,   
+           fill = NA, color = "black", size = 1)+  
+  ggtitle(" ")  
+# save  2 PDF
+ggsave("lncrna.pdf", plot = p, width = 8, height = 6, dpi = 600)  
+
+
+
+
+library(clusterProfiler)
+library(org.Hs.eg.db)
+#Down-regulated genes were analyzed ----------------------------------------------------------------------
+volcano_data$gene_id <- row.names(volcano_data)
+volcano_data$gene_id  <- mapIds(org.Hs.eg.db, keys=volcano_data$gene_id, column="SYMBOL", keytype="ENSEMBL", multiVals="first") 
+volcano_data <- na.omit(volcano_data)
+new_data_frame <- data.frame(  
+  gene_id = volcano_data$gene_id,  
+  log2FC = volcano_data$log2FC  
+)  
+write.csv(new_data_frame, "mrna_gene_id_and_log2FC.csv", row.names = FALSE)
+
+
+all_gene_ids  <- volcano_data$gene_id 
+up_genes <- volcano_data[volcano_data$direction == "Up", "gene_id"]  
+down_genes <- volcano_data[volcano_data$direction == "Down", "gene_id"]  
+all_gene_ids <- na.omit(all_gene_ids)
+up_genes <- na.omit(up_genes)
+down_genes <- na.omit(down_genes)
+ego_results <- enrichGO(gene = all_gene_ids, OrgDb = org.Hs.eg.db, keyType = "ENTREZID", pAdjustMethod = "BH", pvalueCutoff = 0.005, qvalueCutoff = 0.02, readable = TRUE)  
+ekg_results <- enrichKEGG(gene = down_genes, organism = "hsa")
