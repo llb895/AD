@@ -11,11 +11,12 @@ randomForest package 4.7.1.1
 Usage
 ---
 1.After preparing the data files, you can follow our analysis workflow in the project and utilize the Random_forest.RData file located in our model folder. Note: The first column of the data file should be designated as the sample ID column, the second column as the class column, and the subsequent columns serve as feature data columns. Specific adjustments can be made according to individual circumstances.  
+
 2.Upon successfully running Random_forest.RData, you will obtain several ROC curve images in the directory, the number of which depends on the quantity of data files fed into the process.  
 
 Citation
 ---
-Ma R, Lu L, Li Q, He C & Zhou X. "Diagnosis of Alzheimer's Disease by Integrating Multilayer Information from Plasma Cell-Free RNA Sequencing Data". In preparation.  
+`Ma R, Lu L, Li Q, He C & Zhou X. "Diagnosis of Alzheimer's Disease by Integrating Multilayer Information from Plasma Cell-Free RNA Sequencing Data". In preparation.  `
 
 License
 ---
