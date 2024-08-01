@@ -35,7 +35,7 @@ In __Functional annotation__, the process for annotating the functional roles of
 In __Microbial experiment__, the relevant implementation process for microbial data analysis is outlined, encompassing two primary experiments: the Microbial_contribution_rate_experiment, which assesses the contribution rate of microbial components, and the Randomization_MicrobialComplementaryEffectExperiment, which evaluates the predictive performance complementarity effect among microbial features.  
 
 In __model__, the implementation process of our constructed models is detailed. Specifically, it includes:  
-    __Random Forest _ Cross validationR__: A model is built in R using an 80% training set and a 20% validation set for cross-validation purposes.  
-    __Random_forest__: Another Random Forest model is constructed based on the article's specified 120 samples for the training set and 208 samples for the validation set.  
-    __Random_forest_CDR_MMSE__: Building upon the Random Forest model, CDR (Clinical Dementia Rating) and MMSE (Mini-Mental State Examination) indicators are incorporated to further validate and enhance the model's predictive performance.  
-    __Spearman_correlation_analysis_of_CDR_MMSE__: This analysis examines the individual Spearman correlation of CDR and MMSE indicators, providing insights into the strength and direction of the relationship between these two measures.  
+        __Random Forest _ Cross validationR__: A model is built in R using an 80% training set and a 20% validation set for cross-validation purposes.  
+        __Random_forest__: Another Random Forest model is constructed based on the article's specified 120 samples for the training set and 208 samples for the validation set.  
+        __Random_forest_CDR_MMSE__: Building upon the Random Forest model, CDR (Clinical Dementia Rating) and MMSE (Mini-Mental State Examination) indicators are incorporated to further validate and enhance the model's predictive performance.  
+        __Spearman_correlation_analysis_of_CDR_MMSE__: This analysis examines the individual Spearman correlation of CDR and MMSE indicators, providing insights into the strength and direction of the relationship between these two measures.  
