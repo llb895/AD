@@ -20,7 +20,7 @@ Citation
 
 License
 ---
-For academic research, please refer to MIT license.
+For academic research, please refer to MIT license.  
 For commerical usage, please contact the authors.
 
 Content of the project
